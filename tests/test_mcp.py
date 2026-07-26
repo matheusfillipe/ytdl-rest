@@ -53,3 +53,24 @@ async def test_tools_refuse_a_wrong_key() -> None:
 
 def test_instructions_mention_the_link_is_temporary() -> None:
     assert "temporary" in mcp_module.INSTRUCTIONS.lower()
+
+
+async def test_a_header_key_is_accepted_instead_of_the_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch(*_: Any, **__: Any) -> Result:
+        return RESULT
+
+    monkeypatch.setattr(service, "fetch", fake_fetch)
+    monkeypatch.setattr(mcp_module, "get_http_headers", lambda: {"x-api-key": "secret"})
+    mcp = create_mcp(Settings(api_key_hash=hash_key("secret")))
+    result = await mcp.call_tool("download_media", {"url": "u"})
+    assert result.structured_content == RESULT.as_dict()
+
+
+async def test_a_bearer_token_is_accepted_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_info(*_: Any, **__: Any) -> dict[str, Any]:
+        return {"title": "A Song"}
+
+    monkeypatch.setattr(service, "info", fake_info)
+    monkeypatch.setattr(mcp_module, "get_http_headers", lambda: {"authorization": "Bearer secret"})
+    mcp = create_mcp(Settings(api_key_hash=hash_key("secret")))
+    assert (await mcp.call_tool("media_info", {"url": "u"})).structured_content == {"title": "A Song"}

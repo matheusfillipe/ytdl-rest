@@ -6,6 +6,7 @@ from typing import Annotated
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 from pydantic import Field
 
 from ytdl_rest import service
@@ -13,7 +14,8 @@ from ytdl_rest.auth import verify
 from ytdl_rest.config import Settings
 from ytdl_rest.config import get_settings
 
-KEY_FIELD = Field(description="API key for this ytdl-rest instance.")
+KEY_FIELD = Field(description="API key for this ytdl-rest instance. Not needed when sent as a header.")
+BEARER_PREFIX = "Bearer "
 
 INSTRUCTIONS = """
 ytdl-rest downloads media from any site yt-dlp supports and republishes it on a file host,
@@ -28,14 +30,27 @@ class NotAuthorizedError(RuntimeError):
     """The supplied key does not match."""
 
 
+def header_key() -> str | None:
+    """The key a client sent as a header, if it reached this server over HTTP.
+
+    An agent framework configured once with a header is far easier to wire than one that
+    must thread a key through every tool call, so both are accepted.
+    """
+    headers = get_http_headers()
+    key = headers.get("x-api-key")
+    if key:
+        return key
+    authorization = headers.get("authorization", "")
+    return authorization[len(BEARER_PREFIX) :] if authorization.startswith(BEARER_PREFIX) else None
+
+
 def create_mcp(settings: Settings | None = None) -> FastMCP:
     resolved = settings or get_settings()
     mcp: FastMCP = FastMCP(name="ytdl-rest", instructions=INSTRUCTIONS)
 
     def _check(api_key: str | None) -> None:
-        # Clients reaching MCP over HTTP send headers, but stdio clients have none, so the
-        # key is also accepted as a tool argument.
-        if not verify(api_key, resolved.api_key_hash):
+        # stdio clients have no headers, so the key is also accepted as a tool argument.
+        if not verify(api_key or header_key(), resolved.api_key_hash):
             raise NotAuthorizedError("invalid or missing api_key")
 
     @mcp.tool
