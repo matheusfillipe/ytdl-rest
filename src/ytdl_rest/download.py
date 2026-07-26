@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 from typing import Any
 
 import yt_dlp
@@ -14,9 +15,6 @@ from ytdl_rest.config import AUDIO_FORMATS
 from ytdl_rest.config import VIDEO_FORMATS
 from ytdl_rest.config import Mode
 from ytdl_rest.config import Settings
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
 
@@ -90,6 +88,23 @@ def format_selector(request: Request) -> str:
     return f"bv*[height<={height}]+ba/b[height<={height}]/bv*+ba/b"
 
 
+def writable_cookies(settings: Settings, outdir: Path) -> Path | None:
+    """A throwaway copy of the cookie jar, because yt-dlp saves it back on close.
+
+    The configured file is usually mounted read-only and refreshed underneath us, so it
+    is copied per call rather than once: every request reads whatever is current, and
+    yt-dlp's write lands somewhere that is discarded afterwards.
+    """
+    if not settings.cookies_file or not settings.cookies_file.exists():
+        return None
+    # A subdirectory, so the copy is never mistaken for the downloaded media.
+    state = outdir / ".state"
+    state.mkdir(exist_ok=True)
+    copy = state / "cookies.txt"
+    copy.write_bytes(settings.cookies_file.read_bytes())
+    return copy
+
+
 def build_options(settings: Settings, request: Request, outdir: Path) -> dict[str, Any]:
     """Every yt-dlp option this service sets, so it can be asserted on without downloading."""
     options: dict[str, Any] = {
@@ -121,8 +136,9 @@ def build_options(settings: Settings, request: Request, outdir: Path) -> dict[st
 
     if settings.max_duration_seconds > 0:
         options["match_filter"] = match_filter_func(f"duration < {settings.max_duration_seconds}")
-    if settings.cookies_file:
-        options["cookiefile"] = str(settings.cookies_file)
+    cookies = writable_cookies(settings, outdir)
+    if cookies:
+        options["cookiefile"] = str(cookies)
     if settings.proxy:
         options["proxy"] = settings.proxy
     if settings.user_agent:
@@ -176,8 +192,6 @@ def run(settings: Settings, request: Request, outdir: Path) -> Media:
 def probe(settings: Settings, url: str) -> dict[str, Any]:
     """Metadata only, so a caller can choose a quality that exists."""
     options: dict[str, Any] = {"quiet": True, "no_warnings": True, "noplaylist": not settings.allow_playlist}
-    if settings.cookies_file:
-        options["cookiefile"] = str(settings.cookies_file)
     if settings.proxy:
         options["proxy"] = settings.proxy
     if settings.pot_provider_url:
@@ -185,8 +199,12 @@ def probe(settings: Settings, url: str) -> dict[str, Any]:
     options.update(settings.extra_options)
 
     try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=False)
+        with tempfile.TemporaryDirectory(dir=settings.work_dir) as scratch:
+            cookies = writable_cookies(settings, Path(scratch))
+            if cookies:
+                options["cookiefile"] = str(cookies)
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
     except DownloadError as error:
         raise ExtractionError(str(error)) from error
     if info is None:

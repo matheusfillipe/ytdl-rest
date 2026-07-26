@@ -88,8 +88,10 @@ def test_best_audio_quality_asks_ffmpeg_for_the_codec_default(settings: Settings
 
 
 def test_extraction_settings_reach_yt_dlp(tmp_path: Path) -> None:
+    cookies = tmp_path / "cookies.txt"
+    cookies.write_text("# Netscape HTTP Cookie File\n")
     settings = Settings(
-        cookies_file=Path("/etc/cookies.txt"),
+        cookies_file=cookies,
         pot_provider_url="http://pot:4416",
         proxy="socks5://proxy:1080",
         user_agent="agent/1",
@@ -97,7 +99,7 @@ def test_extraction_settings_reach_yt_dlp(tmp_path: Path) -> None:
         extra_options={"retries": 9},
     )
     options = download.build_options(settings, Request("u", "video", "best", "mp4"), tmp_path)
-    assert options["cookiefile"] == "/etc/cookies.txt"
+    assert Path(options["cookiefile"]).read_text() == cookies.read_text()
     assert options["extractor_args"]["youtubepot-bgutilhttp"]["base_url"] == ["http://pot:4416"]
     assert options["proxy"] == "socks5://proxy:1080"
     assert options["http_headers"]["User-Agent"] == "agent/1"
@@ -164,3 +166,29 @@ def test_probe_returns_metadata_without_downloading(settings: Settings, monkeypa
     info = download.probe(settings, "u")
     assert info["title"] == "T"
     assert info["formats"][0]["height"] == 360
+
+
+def test_cookies_are_copied_somewhere_writable(tmp_path: Path) -> None:
+    source = tmp_path / "mounted" / "cookies.txt"
+    source.parent.mkdir()
+    source.write_text("# Netscape HTTP Cookie File\n")
+    source.chmod(0o444)
+    outdir = tmp_path / "work"
+    outdir.mkdir()
+
+    settings = Settings(cookies_file=source)
+    options = download.build_options(settings, Request("u", "audio", "best", "mp3"), outdir)
+
+    copy = Path(options["cookiefile"])
+    assert copy != source
+    assert copy.read_text() == source.read_text()
+    # yt-dlp saves the jar back on close, so the copy has to be writable.
+    copy.write_text("changed")
+    # And it must not be mistaken for the downloaded media.
+    assert copy.parent != outdir
+
+
+def test_missing_cookie_file_is_simply_skipped(tmp_path: Path) -> None:
+    settings = Settings(cookies_file=tmp_path / "absent.txt")
+    options = download.build_options(settings, Request("u", "audio", "best", "mp3"), tmp_path)
+    assert "cookiefile" not in options
