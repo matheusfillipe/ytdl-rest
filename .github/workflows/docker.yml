@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  # Weekly, so the image picks up new yt-dlp releases without a code change.
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -48,6 +52,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # The commit is unchanged on the weekly run, so a cached yt-dlp layer would republish
+          # the same image. Only a cold build actually picks up a new release.
+          no-cache: ${{ github.event_name == 'schedule' }}
 
       - name: Report what was published
         run: docker buildx imagetools inspect ${{ env.image }}:${{ steps.meta.outputs.version }}

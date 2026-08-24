@@ -7,6 +7,9 @@ RUN apt-get update && \
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
+# yt-dlp solves YouTube's nsig challenges in JavaScript, and deno is the runtime it picks by default.
+COPY --from=denoland/deno:bin-2.9.5 /deno /usr/local/bin/deno
+
 WORKDIR /app
 
 # Lockfile first, so dependency layers survive a source change.
@@ -16,7 +19,12 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN uv sync --frozen --no-dev
 
-RUN adduser --system app && chown -R app /app
+# An extractor a release behind answers 403, so the image carries the newest yt-dlp at build time.
+RUN uv pip install --python .venv --upgrade yt-dlp yt-dlp-ejs
+
+# The home directory has to be writable: yt-dlp caches the solved signature functions under it,
+# and without the cache every request re-fetches the player JS and re-runs the solver.
+RUN adduser --system --home /app app && chown -R app /app
 USER app
 
 EXPOSE 8000
