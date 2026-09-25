@@ -185,7 +185,7 @@ def run(settings: Settings, request: Request, outdir: Path) -> Media:
     return Media(
         path=path,
         title=str(info.get("title") or path.stem),
-        duration=info.get("duration"),
+        duration=info.get("duration") or local_duration(path),
         extractor=str(info.get("extractor_key") or info.get("extractor") or "unknown"),
         webpage_url=str(info.get("webpage_url") or request.url),
     )
@@ -199,6 +199,15 @@ def file_duration(media_url: str | None) -> float | None:
     """
     if not media_url or not media_url.startswith(("http://", "https://")):
         return None
+    return _ffprobe_duration(media_url, "http,https,tcp,tls")
+
+
+def local_duration(path: Path) -> float | None:
+    """Seconds of a file we downloaded, for sources whose extractor reported no duration."""
+    return _ffprobe_duration(str(path), "file")
+
+
+def _ffprobe_duration(target: str, protocols: str) -> float | None:
     try:
         result = subprocess.run(
             [
@@ -206,13 +215,13 @@ def file_duration(media_url: str | None) -> float | None:
                 "-v",
                 "error",
                 "-protocol_whitelist",
-                "http,https,tcp,tls",
+                protocols,
                 "-show_entries",
                 "format=duration",
                 "-of",
                 "csv=p=0",
                 "-i",
-                media_url,
+                target,
             ],
             capture_output=True,
             text=True,

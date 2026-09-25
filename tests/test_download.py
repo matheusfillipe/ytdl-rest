@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
+import wave
 from pathlib import Path
 from typing import Any
 from typing import ClassVar
@@ -226,3 +228,15 @@ def test_missing_cookie_file_is_simply_skipped(tmp_path: Path) -> None:
     settings = Settings(cookies_file=tmp_path / "absent.txt")
     options = download.build_options(settings, Request("u", "audio", "best", "mp3"), tmp_path)
     assert "cookiefile" not in options
+
+
+@pytest.mark.skipif(shutil.which("ffprobe") is None, reason="needs ffprobe")
+def test_local_duration_measures_a_downloaded_file(tmp_path: Path) -> None:
+    song = tmp_path / "upload.wav"
+    with wave.open(str(song), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\x00\x00" * 4000)
+
+    assert download.local_duration(song) == pytest.approx(0.5)
