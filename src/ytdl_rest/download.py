@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ from ytdl_rest.config import Mode
 from ytdl_rest.config import Settings
 
 OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
+FFPROBE_TIMEOUT_SECONDS = 30
 
 
 class UnsupportedRequestError(ValueError):
@@ -189,6 +191,39 @@ def run(settings: Settings, request: Request, outdir: Path) -> Media:
     )
 
 
+def file_duration(media_url: str | None) -> float | None:
+    """Seconds of media behind a direct file link, which yt-dlp's generic extractor leaves unset.
+
+    ffprobe reads only the headers it needs, and the protocol whitelist stops a crafted URL
+    from reading local files through it.
+    """
+    if not media_url or not media_url.startswith(("http://", "https://")):
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "http,https,tcp,tls",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                "-i",
+                media_url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=FFPROBE_TIMEOUT_SECONDS,
+            check=True,
+        )
+        return float(result.stdout.strip())
+    except (subprocess.SubprocessError, ValueError, OSError):
+        return None
+
+
 def probe(settings: Settings, url: str) -> dict[str, Any]:
     """Metadata only, so a caller can choose a quality that exists."""
     options: dict[str, Any] = {"quiet": True, "no_warnings": True, "noplaylist": not settings.allow_playlist}
@@ -222,7 +257,7 @@ def probe(settings: Settings, url: str) -> dict[str, Any]:
     ]
     return {
         "title": info.get("title"),
-        "duration": info.get("duration"),
+        "duration": info.get("duration") or file_duration(info.get("url")),
         "uploader": info.get("uploader"),
         "extractor": info.get("extractor_key") or info.get("extractor"),
         "webpage_url": info.get("webpage_url") or url,

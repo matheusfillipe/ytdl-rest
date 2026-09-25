@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 from typing import ClassVar
@@ -166,6 +167,39 @@ def test_probe_returns_metadata_without_downloading(settings: Settings, monkeypa
     info = download.probe(settings, "u")
     assert info["title"] == "T"
     assert info["formats"][0]["height"] == 360
+
+
+def test_probe_measures_a_direct_file_with_ffprobe(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Generic(FakeYoutubeDL):
+        def __init__(self, options: dict[str, Any]) -> None:
+            self.options = options
+
+        def extract_info(self, url: str, download: bool = True) -> dict[str, Any] | None:
+            return {"title": "song", "duration": None, "url": "https://files.example/song.mp3"}
+
+    def ffprobe(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        assert command[-1] == "https://files.example/song.mp3"
+        assert "http,https,tcp,tls" in command
+        return subprocess.CompletedProcess(command, 0, stdout="84.08\n")
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", Generic)
+    monkeypatch.setattr("ytdl_rest.download.subprocess.run", ffprobe)
+
+    assert download.probe(settings, "u")["duration"] == 84.08
+
+
+@pytest.mark.parametrize("media_url", [None, "file:///etc/passwd", "concat:a|b"])
+def test_file_duration_only_reads_http_links(media_url: str | None) -> None:
+    assert download.file_duration(media_url) is None
+
+
+def test_file_duration_is_none_when_ffprobe_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr("ytdl_rest.download.subprocess.run", failing)
+
+    assert download.file_duration("https://files.example/broken.mp3") is None
 
 
 def test_cookies_are_copied_somewhere_writable(tmp_path: Path) -> None:
