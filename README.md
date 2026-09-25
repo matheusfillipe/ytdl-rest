@@ -18,4 +18,7 @@ curl -X POST localhost:8000/v1/download -H 'content-type: application/json' \
 # {"url":"https://s.example.com/ab.mp3","title":"...","duration":213.0,"size_bytes":5111808,...}
 ```
 
+To keep the file private, `POST /v1/file` takes the same body and answers with the file itself, with
+`X-Media-Title` (URL-encoded) and `X-Media-Duration` headers.
+
 Every setting is an environment variable prefixed `YTDL_`; see [`.env.example`](.env.example).

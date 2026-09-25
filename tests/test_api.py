@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from typing import Any
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,9 +12,14 @@ from ytdl_rest import service
 from ytdl_rest.auth import hash_key
 from ytdl_rest.config import Settings
 from ytdl_rest.download import ExtractionError
+from ytdl_rest.download import Media
 from ytdl_rest.download import UnsupportedRequestError
+from ytdl_rest.service import Downloaded
 from ytdl_rest.service import Result
 from ytdl_rest.service import UploadError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 RESULT = Result(
     url="https://s.test/ab.mp3",
@@ -73,6 +80,36 @@ def test_download_maps_failures_to_status_codes(
 
     monkeypatch.setattr(service, "fetch", failing)
     assert client().post("/v1/download", json={"url": "u"}).status_code == expected
+
+
+def test_file_answers_with_the_file_and_its_metadata_then_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    song = workdir / "Café.mp3"
+    song.write_bytes(b"ID3audio")
+
+    async def fake_download(*_: Any, **__: Any) -> Downloaded:
+        return Downloaded(Media(song, "Café au lait", 9.5, "Fake", "https://page.test/v?a=1"), workdir)
+
+    monkeypatch.setattr(service, "download_to_disk", fake_download)
+    response = client().post("/v1/file", json={"url": "u", "mode": "audio"})
+
+    assert response.status_code == 200
+    assert response.content == b"ID3audio"
+    assert unquote(response.headers["x-media-title"]) == "Café au lait"
+    assert response.headers["x-media-duration"] == "9.5"
+    assert response.headers["x-media-webpage-url"] == "https://page.test/v?a=1"
+    assert not workdir.exists()
+
+
+def test_file_maps_an_unreadable_url_to_422(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def failing(*_: Any, **__: Any) -> Downloaded:
+        raise ExtractionError("no such video")
+
+    monkeypatch.setattr(service, "download_to_disk", failing)
+    assert client().post("/v1/file", json={"url": "u"}).status_code == 422
 
 
 def test_info_returns_metadata(monkeypatch: pytest.MonkeyPatch) -> None:

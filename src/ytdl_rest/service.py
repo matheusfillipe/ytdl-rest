@@ -7,6 +7,7 @@ occupies a worker thread while the event loop keeps serving other requests.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import tempfile
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -104,6 +105,40 @@ async def fetch(
         extractor=media.extractor,
         webpage_url=media.webpage_url,
     )
+
+
+@dataclass(frozen=True)
+class Downloaded:
+    """A finished download left on disk; the caller deletes `workdir` once it has sent the file."""
+
+    media: download.Media
+    workdir: Path
+
+
+async def download_to_disk(
+    settings: Settings,
+    url: str,
+    mode: str | None = None,
+    quality: str | None = None,
+    format: str | None = None,
+) -> Downloaded:
+    """Download one item and keep it on disk, for callers that store the file themselves."""
+    request = download.resolve(settings, url, mode, quality, format)
+
+    async with _limiter(settings):
+        workdir = Path(tempfile.mkdtemp(dir=settings.work_dir))
+        finished = False
+        try:
+            media = await asyncio.wait_for(
+                asyncio.to_thread(download.run, settings, request, workdir),
+                timeout=settings.download_timeout_seconds,
+            )
+            finished = True
+        finally:
+            if not finished:
+                shutil.rmtree(workdir, ignore_errors=True)
+
+    return Downloaded(media=media, workdir=workdir)
 
 
 async def info(settings: Settings, url: str) -> dict[str, Any]:

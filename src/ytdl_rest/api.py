@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import shutil
 from typing import Annotated
 from typing import Any
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import Depends
 from fastapi import FastAPI
 from fastapi import Header
 from fastapi import HTTPException
 from fastapi import status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from pydantic import Field
+from starlette.background import BackgroundTask
 
 from ytdl_rest import __version__
 from ytdl_rest import service
@@ -112,6 +116,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except TimeoutError as error:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "download timed out") from error
         return DownloadResponse(**result.as_dict())
+
+    @app.post(
+        "/v1/file",
+        response_class=FileResponse,
+        dependencies=[Depends(require_api_key)],
+        tags=["media"],
+    )
+    async def download_file(request: DownloadRequest) -> FileResponse:
+        """Download media and answer with the file itself, so the caller keeps it private.
+
+        The title, duration and page come back as `X-Media-Title` (URL-encoded),
+        `X-Media-Duration` (seconds, empty when unknown) and `X-Media-Webpage-Url`.
+        """
+        try:
+            downloaded = await service.download_to_disk(
+                resolved,
+                url=request.url,
+                mode=request.mode,
+                quality=request.quality,
+                format=request.format,
+            )
+        except UnsupportedRequestError as error:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+        except ExtractionError as error:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+        except TimeoutError as error:
+            raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "download timed out") from error
+        media = downloaded.media
+        return FileResponse(
+            media.path,
+            filename=media.path.name,
+            headers={
+                "X-Media-Title": quote(media.title),
+                "X-Media-Duration": "" if media.duration is None else str(media.duration),
+                "X-Media-Webpage-Url": quote(media.webpage_url, safe=":/?&=%#"),
+            },
+            background=BackgroundTask(shutil.rmtree, downloaded.workdir, ignore_errors=True),
+        )
 
     @app.post("/v1/info", dependencies=[Depends(require_api_key)], tags=["media"])
     async def media_info(request: InfoRequest) -> dict[str, Any]:
