@@ -19,6 +19,7 @@ from ytdl_rest.config import Settings
 
 OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
 FFPROBE_TIMEOUT_SECONDS = 30
+FORBIDDEN_ATTEMPTS = 3
 
 
 class UnsupportedRequestError(ValueError):
@@ -161,14 +162,23 @@ def _only_file(outdir: Path) -> Path:
     return max(files, key=lambda path: path.stat().st_size)
 
 
+def _extract(options: dict[str, Any], url: str) -> dict[str, Any] | None:
+    # YouTube now and then answers one stream URL with 403 while the next extraction's URL works,
+    # and yt-dlp's own retries reuse the refused URL, so we extract again from scratch.
+    for attempt in range(1, FORBIDDEN_ATTEMPTS + 1):
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info: dict[str, Any] | None = ydl.extract_info(url, download=True)
+                return info
+        except DownloadError as error:
+            if attempt == FORBIDDEN_ATTEMPTS or "HTTP Error 403" not in str(error):
+                raise ExtractionError(str(error)) from error
+    return None
+
+
 def run(settings: Settings, request: Request, outdir: Path) -> Media:
     """Download one item. Blocking: yt-dlp is synchronous throughout."""
-    options = build_options(settings, request, outdir)
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(request.url, download=True)
-    except DownloadError as error:
-        raise ExtractionError(str(error)) from error
+    info = _extract(build_options(settings, request, outdir), request.url)
 
     if info is None:
         raise ExtractionError("nothing matched the requested filters")

@@ -10,6 +10,7 @@ from typing import Self
 
 import pytest
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
 from ytdl_rest import download
 from ytdl_rest.config import Settings
@@ -142,6 +143,47 @@ def test_run_reports_when_nothing_matched(settings: Settings, tmp_path: Path, mo
     monkeypatch.setattr(yt_dlp, "YoutubeDL", Empty)
     with pytest.raises(ExtractionError):
         download.run(settings, Request("u", "audio", "best", "mp3"), tmp_path)
+
+
+class RefusedFirst(FakeYoutubeDL):
+    """Answers the first extractions with YouTube's 403, as a refused stream URL does."""
+
+    refusals = 1
+    message = "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+    calls = 0
+
+    def extract_info(self, url: str, download: bool = True) -> dict[str, Any] | None:
+        type(self).calls += 1
+        if type(self).calls <= self.refusals:
+            raise DownloadError(self.message)
+        return super().extract_info(url, download)
+
+
+def test_run_extracts_again_after_a_refused_stream(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(RefusedFirst, "calls", 0)
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", RefusedFirst)
+    media = download.run(settings, Request("u", "audio", "best", "mp3"), tmp_path)
+    assert (RefusedFirst.calls, media.title) == (2, "A Song")
+
+
+def test_run_gives_up_after_three_refusals(settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(RefusedFirst, "calls", 0)
+    monkeypatch.setattr(RefusedFirst, "refusals", 5)
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", RefusedFirst)
+    with pytest.raises(ExtractionError, match="403"):
+        download.run(settings, Request("u", "audio", "best", "mp3"), tmp_path)
+    assert RefusedFirst.calls == download.FORBIDDEN_ATTEMPTS
+
+
+def test_run_does_not_retry_other_errors(settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(RefusedFirst, "calls", 0)
+    monkeypatch.setattr(RefusedFirst, "message", "ERROR: Video unavailable")
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", RefusedFirst)
+    with pytest.raises(ExtractionError, match="unavailable"):
+        download.run(settings, Request("u", "audio", "best", "mp3"), tmp_path)
+    assert RefusedFirst.calls == 1
 
 
 def test_run_takes_the_first_entry_of_a_playlist(
