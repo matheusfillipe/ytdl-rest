@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from ytdl_rest.config import Settings
 OUTPUT_TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
 FFPROBE_TIMEOUT_SECONDS = 30
 FORBIDDEN_ATTEMPTS = 3
+FORBIDDEN_BACKOFF_SECONDS = 10
 
 
 class UnsupportedRequestError(ValueError):
@@ -163,8 +165,8 @@ def _only_file(outdir: Path) -> Path:
 
 
 def _extract(options: dict[str, Any], url: str) -> dict[str, Any] | None:
-    # YouTube now and then answers one stream URL with 403 while the next extraction's URL works,
-    # and yt-dlp's own retries reuse the refused URL, so we extract again from scratch.
+    # YouTube refuses stream URLs with 403 for short spells, and yt-dlp's own retries reuse the
+    # refused URL, so we wait out the spell and extract again from scratch.
     for attempt in range(1, FORBIDDEN_ATTEMPTS + 1):
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
@@ -173,6 +175,7 @@ def _extract(options: dict[str, Any], url: str) -> dict[str, Any] | None:
         except DownloadError as error:
             if attempt == FORBIDDEN_ATTEMPTS or "HTTP Error 403" not in str(error):
                 raise ExtractionError(str(error)) from error
+            time.sleep(FORBIDDEN_BACKOFF_SECONDS * attempt)
     return None
 
 

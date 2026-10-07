@@ -159,13 +159,21 @@ class RefusedFirst(FakeYoutubeDL):
         return super().extract_info(url, download)
 
 
+@pytest.fixture(autouse=True)
+def no_backoff(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    waits: list[float] = []
+    monkeypatch.setattr("ytdl_rest.download.time.sleep", waits.append)
+    return waits
+
+
 def test_run_extracts_again_after_a_refused_stream(
-    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_backoff: list[float]
 ) -> None:
     monkeypatch.setattr(RefusedFirst, "calls", 0)
     monkeypatch.setattr(yt_dlp, "YoutubeDL", RefusedFirst)
     media = download.run(settings, Request("u", "audio", "best", "mp3"), tmp_path)
     assert (RefusedFirst.calls, media.title) == (2, "A Song")
+    assert no_backoff == [download.FORBIDDEN_BACKOFF_SECONDS]
 
 
 def test_run_gives_up_after_three_refusals(settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
