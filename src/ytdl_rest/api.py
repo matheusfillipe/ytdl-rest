@@ -157,7 +157,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/v1/info", dependencies=[Depends(require_api_key)], tags=["media"])
     async def media_info(request: InfoRequest) -> dict[str, Any]:
-        """Title, duration and available formats, without downloading anything."""
+        """Title, duration, license and available formats, without downloading anything."""
         try:
             return await service.info(resolved, request.url)
         except ExtractionError as error:

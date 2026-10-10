@@ -83,7 +83,7 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
         url: Annotated[str, Field(description="Page or media URL to inspect.")],
         api_key: Annotated[str | None, KEY_FIELD] = None,
     ) -> dict[str, Any]:
-        """Title, duration and available formats for a URL, without downloading it."""
+        """Title, duration, license and available formats for a URL, without downloading it."""
         _check(api_key)
         return await service.info(resolved, url)
 

@@ -213,11 +213,17 @@ def test_probe_returns_metadata_without_downloading(settings: Settings, monkeypa
 
         def extract_info(self, url: str, download: bool = True) -> dict[str, Any] | None:
             assert download is False
-            return {"title": "T", "duration": 3.0, "formats": [{"format_id": "18", "ext": "mp4", "height": 360}]}
+            return {
+                "title": "T",
+                "duration": 3.0,
+                "license": "Creative Commons Attribution license (reuse allowed)",
+                "formats": [{"format_id": "18", "ext": "mp4", "height": 360}],
+            }
 
     monkeypatch.setattr(yt_dlp, "YoutubeDL", Prober)
     info = download.probe(settings, "u")
     assert info["title"] == "T"
+    assert info["license"] == "Creative Commons Attribution license (reuse allowed)"
     assert info["formats"][0]["height"] == 360
 
 

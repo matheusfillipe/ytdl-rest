@@ -281,6 +281,7 @@ def probe(settings: Settings, url: str) -> dict[str, Any]:
         "title": info.get("title"),
         "duration": info.get("duration") or file_duration(info.get("url")),
         "uploader": info.get("uploader"),
+        "license": info.get("license"),
         "extractor": info.get("extractor_key") or info.get("extractor"),
         "webpage_url": info.get("webpage_url") or url,
         "thumbnail": info.get("thumbnail"),
