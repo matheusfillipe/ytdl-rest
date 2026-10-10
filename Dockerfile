@@ -20,7 +20,8 @@ COPY . .
 RUN uv sync --frozen --no-dev
 
 # An extractor a release behind answers 403, so the image carries the newest yt-dlp at build time.
-RUN uv pip install --python .venv --upgrade yt-dlp yt-dlp-ejs
+# The PO token plugin follows the pot-provider sidecar, which also runs :latest.
+RUN uv pip install --python .venv --upgrade yt-dlp yt-dlp-ejs bgutil-ytdlp-pot-provider
 
 # The home directory has to be writable: yt-dlp caches the solved signature functions under it,
 # and without the cache every request re-fetches the player JS and re-runs the solver.

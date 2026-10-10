@@ -15,6 +15,7 @@ dependencies = [
     "fastmcp>=3.4.4",
     "yt-dlp>=2026.8.19",
     "yt-dlp-ejs>=0.8",
+    "bgutil-ytdlp-pot-provider>=1.2",
 ]
 
 [project.optional-dependencies]
